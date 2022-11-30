@@ -78,7 +78,7 @@ Fig. 二维静态阻挡下的塌落，阻挡物后堆积松散，且有一个例
 
 期望实现的代码框架(目前并没有全部实现或正确实现)：
 
-![Flowchart](.\img/code_architecture.png)
+![Flowchart](./img/code_architecture.png)
 
 重点问题解决顺序：
 1. 尝试多种论文里的方案，实现良好的dummy particle和real particle的相互作用，在尽量少的人工项下实现相对正确且无穿透的结果
