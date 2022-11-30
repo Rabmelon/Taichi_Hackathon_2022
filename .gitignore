@@ -1,3 +1,25 @@
+# MY GITIGNORE
+
+# office temp file
+~$*
+
+# folders
+.vscode*/
+tmp/
+temp/
+screenshots/
+venv/
+sim_*/
+
+# files
+.mp4
+.mkv
+.avi
+imgui.ini
+desktop.ini
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
