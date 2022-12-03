@@ -10,6 +10,7 @@ temp/
 screenshots/
 venv/
 sim_*/
+test/
 
 # files
 .mp4

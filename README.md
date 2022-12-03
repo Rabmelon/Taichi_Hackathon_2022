@@ -60,7 +60,7 @@ Fig. 虚粒子边界条件下，运行就爆炸，表明边界附近粒子与虚
    * dynamic rigid body下还存在穿透问题.
 
 ![sand column collapse - static rigid](img/sim_2022_11_30_ccsr_muI_vel.png)
-Fig. 二维静态阻挡下的塌落，阻挡物后堆积松散，且有一个例子飞出很远(速度着色)
+Fig. 二维静态阻挡下的塌落，阻挡物后堆积松散，且有一个粒子飞出很远(速度着色)
 
 
 5. UI系统
@@ -68,10 +68,12 @@ Fig. 二维静态阻挡下的塌落，阻挡物后堆积松散，且有一个例
    * 运行控制-相机位置、启动/暂停、按步暂停、按时间暂停、截图输出、导出截图
 
 **重要问题**
-1. 模拟速度慢！使用2阶跳蛙法时间积分，同分辨率，μ(I)本构，arch=ti.cuda，RTX3060 Laptop GPU + AMD R7 5800H，每百步保存截图：
-	* 2D, 5k real particles + 1248 dummy particles, 100k steps, 15min
-	* 3D, 125k real particles + 155k dummy particles, 100k steps, 610min
-2. 边界粒子处理有问题！边界虚粒子和固体粒子与流体粒子的作用需大力修正。
+1. 边界粒子处理有问题！边界虚粒子和固体粒子与流体粒子的作用需大力修正。
+2. 模拟速度慢！使用2阶跳蛙法时间积分，同分辨率，μ(I)本构，arch=ti.cuda，RTX3060 Laptop GPU + AMD R7 5800H，每百步保存截图：
+	* 2D, 5k real particles + 1248 dummy particles, 100k steps, 15min (千粒子千步 1.44s)
+	* 3D, 125k real particles + 155k dummy particles, 100k steps, 610min (千粒子千步 1.31s)
+	* 2D, dambreak, CSPM核函数梯度校正, 8.5k particles, 24k steps, 6min (千粒子千步 1.86s)
+	- 目标速度: **千粒子千步 0.5s**!
 3. 已将不同的时间积分方法与计算模型分离，但还需验证代码中是否存在问题。
 
 ## 期望效果
@@ -82,7 +84,7 @@ Fig. 二维静态阻挡下的塌落，阻挡物后堆积松散，且有一个例
 
 重点问题解决顺序：
 1. 尝试多种论文里的方案，实现良好的dummy particle和real particle的相互作用，在尽量少的人工项下实现相对正确且无穿透的结果
-2. 解决D-P弹塑性本构的问题
+2. 解决弹塑性本构的问题
 3. 实现沙/水与静/动刚体的耦合
 4. 提高计算速度
 
