@@ -11,8 +11,8 @@ if __name__ == "__main__":
     # scene_path = args.scene_file
 
     # * using variable
-    # scene_path = r"./data/scenes/test1_db_water.json"
-    scene_path = r"./data/scenes/test2_cc_sand.json"
+    scene_path = r"./data/scenes/test1_db_water.json"
+    # scene_path = r"./data/scenes/test2_cc_sand.json"
 
     cfg = SimConfiger(scene_file_path=scene_path)
     scene_name = scene_path.split("/")[-1].split(".")[0]

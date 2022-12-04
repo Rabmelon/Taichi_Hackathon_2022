@@ -8,29 +8,39 @@ Ja Gut, 读作 [*呀，故特*], 意为："是的很好！"，来自德语。
 # 项目名 - tiSPHi提升计划
 
 
+# DEMO说明
+
+* 目前可成功、直观运行的demo为water dambreak模拟：
+* 首先安装requirements，需要cuda后端（prefix_sum）及vulkan支持（使用了ggui）。
+* 进入项目目录后，`ti .\run_simulation.py` 即可。
+* 可修改 `.\data\scenes\test1_db_water.json` 文件来控制模拟的相关参数（export暂不可用）。
+* ggui操作：
+  - 空格键启动/暂停模拟
+  - ESC键退出模拟
+  - p键截图并保存至`.\screenshots`文件夹
+  - v键恢复初始视图
+  - Control panel中可拖动控制相机移动速度（0则锁死）、绘制粒子半径
+
 # 项目介绍
 
 **tiSPHi：一个准确、稳定、快速、可拓展的流固耦合SPH模拟器。**
 
-（可自由发挥）比如灵感来源、创作背景、想要完成的功能/优化的方向、期望达到的效果、如何去实现、问题的拆解等。
 
-
-## 代码现状
+## 代码旧况
 
 已经基于SPH_Taichi改写出了自己的框架，并填充了基本代码，能够达到一些效果：
 
 1. water dambreak
    * 在强制碰撞的边界条件下2/3维程序均可运行，但边界附近粒子存在粘度大以及冲击导致空洞等问题
-   * 在dummy particle边界条件下粒子会穿透边界或吞粒子
+   * 在dummy particle边界条件下临近边界的粒子仍存在数值误差
    * 2维和3维程序同参数下运行结果差异较大
-   * 流体粘度贡献比预期要大（一般粘度都是0.01如SPlisHSPlasH，我使用0.001才能达到类似的效果）
    * 压力分布不平滑（应主要是由边界条件导致），密度变化率的计算存在问题（负变化率结果很明显，需要强制让密度不小于初始密度）
 
 ![water dambreak 2D](./img/sim_2022_11_30_db_WC_density.png)
 ![water dambreak 3D](./img/sim_2022_11_30_db_WC_vel_3d.png)
 Fig. Water dambreak at 1.45s, 2D colored by density and 3D colored by velocity, you can find different behaviours and bad pressure distribution.
 
-2. sand column collapse - μ(I)流变本构
+1. sand column collapse - μ(I)流变本构
    * 在强制碰撞边界条件和dummy particle边界条件下、2/3维程序均可运行
 
 ![sand column collapse exp.](img/cc_experiment.png)
@@ -73,7 +83,7 @@ Fig. 二维静态阻挡下的塌落，阻挡物后堆积松散，且有一个粒
 	* 2D, 5k real particles + 1248 dummy particles, 100k steps, 15min (千粒子千步 1.44s)
 	* 3D, 125k real particles + 155k dummy particles, 100k steps, 610min (千粒子千步 1.31s)
 	* 2D, dambreak, CSPM核函数梯度校正, 8.5k particles, 24k steps, 6min (千粒子千步 1.86s)
-	- 目标速度: **千粒子千步 0.5s**!
+	- 目标速度: **千粒子千步 0.5s**
 3. 已将不同的时间积分方法与计算模型分离，但还需验证代码中是否存在问题。
 
 ## 期望效果

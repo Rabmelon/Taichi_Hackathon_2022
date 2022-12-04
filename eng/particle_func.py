@@ -176,9 +176,11 @@ def add_cube(ps,
              color=(0, 0, 0),
              density=None,
              pressure=None,
-             velocity=None):
+             velocity=None,
+             offset=None):
 
-    num_new_particles, num_dim = calc_cube_particle_num(lower_corner, cube_size, ps.dim, offset=ps.particle_diameter)
+    pt_offset = offset if offset is not None else ps.particle_diameter
+    num_new_particles, num_dim = calc_cube_particle_num(lower_corner, cube_size, ps.dim, offset=pt_offset)
     if ps.dim == 2:
         num_dim.append(np.array([0.0]))
 
@@ -197,6 +199,9 @@ def add_cube(ps,
     density_arr = np.full_like(np.zeros(num_new_particles, dtype=np.float64), density if density is not None else 1000.)
     pressure_arr = np.full_like(np.zeros(num_new_particles, dtype=np.float64), pressure if pressure is not None else 0.)
     add_particles(ps, object_id, num_new_particles, new_positions, velocity_arr, density_arr, pressure_arr, mat_id_arr, mat_type_arr, is_dynamic_arr, color_arr)
+
+def add_cube_boundary(ps, pos_bld, pos_fru, type, offset=None, color=[0,0,0]):
+    add_cube(ps=ps, lower_corner=pos_bld, cube_size=pos_fru - pos_bld, mat_type=type, color=color, object_id=type, offset=offset)
 
 
 
@@ -246,6 +251,10 @@ def calc_cube_particle_num(translation, size, dim=3, offset=None):
         num_dim.append(np.arange(translation[i] + off / 2.0, translation[i] + size[i] + 1e-5, off))
     return reduce(lambda x, y: x * y, [len(n) for n in num_dim]), num_dim
 
+def count_cube_num(pos_bld, pos_fru, dim, offset):
+    tmp = calc_cube_particle_num(pos_bld, pos_fru - pos_bld, dim, offset=offset)
+    return tmp[0]
+
 def load_body(body, vox_len):
     obj_id = body["objectId"]
     mesh = tm.load(body["geometryFile"])
@@ -278,9 +287,23 @@ def load_body(body, vox_len):
 
 
 ##############################################
-# Boundary dummy particle
+# Boundary particle
 ##############################################
 # ! very streightforward cube boundary now!!!
+
+def count_boundary(boundary, dim, offset):
+    num = 0
+    for i in range(len(boundary)):
+        num += count_cube_num(boundary[i][0], boundary[i][1], dim, offset)
+    return num
+
+def add_boundary(ps, boundary, type, offset=None, color=[255,255,255]):
+    bdy_type = type
+    bdy_color = np.array(color) / 255
+    for i in range(len(boundary)):
+        add_cube_boundary(ps, boundary[i][0], boundary[i][1], bdy_type, offset, bdy_color)
+
+# Dummy particle
 def calc_dummy_boundary(dim, domain_start, domain_end, vdomain_start, vdomain_end):
     if dim == 3:
         dummy_b_bld = np.array([vdomain_start[0], domain_start[1], vdomain_start[2]])
@@ -310,21 +333,36 @@ def calc_dummy_boundary(dim, domain_start, domain_end, vdomain_start, vdomain_en
         # dummy_boundary = [[dummy_b_bd, dummy_b_fu], [dummy_d_bd, dummy_d_fu], [dummy_f_bd, dummy_f_fu], [dummy_u_bd, dummy_u_fu]]
     return dummy_boundary
 
-def count_cube_dummy(pos_bld, pos_fru, dim, offset):
-    tmp = calc_cube_particle_num(pos_bld, pos_fru - pos_bld, dim, offset=offset)
-    return tmp[0]
+# Repulsive particle
+def calc_rep_boundary(dim, domain_start, domain_end, pt_radius):
+    tmpr = pt_radius / 2
+    if dim == 3:
+        rep_b_bld = np.array([domain_start[0] - tmpr, domain_start[1] + tmpr, domain_start[2] - tmpr])
+        rep_b_fru = np.array([domain_start[0] + tmpr, domain_end[1] - tmpr, domain_end[2] - tmpr])
+        rep_r_bld = np.array([domain_start[0] - tmpr, domain_start[1] + tmpr, domain_end[2] - tmpr])
+        rep_r_fru = np.array([domain_end[0] - tmpr, domain_end[1] - tmpr, domain_end[2] + tmpr])
+        rep_f_bld = np.array([domain_end[0] - tmpr, domain_start[1] + tmpr, domain_start[2] + tmpr])
+        rep_f_fru = np.array([domain_end[0] + tmpr, domain_end[1] - tmpr, domain_end[2] + tmpr])
+        rep_l_bld = np.array([domain_start[0] + tmpr, domain_start[1] + tmpr, domain_start[2] - tmpr])
+        rep_l_fru = np.array([domain_end[0] + tmpr, domain_end[1] - tmpr, domain_start[2] + tmpr])
+        rep_d_bld = domain_start - tmpr
+        rep_d_fru = np.array([domain_end[0], domain_start[1], domain_end[2]]) + tmpr
+        rep_boundary = [[rep_b_bld, rep_b_fru], [rep_r_bld, rep_r_fru], [rep_f_bld, rep_f_fru], [rep_l_bld, rep_l_fru], [rep_d_bld, rep_d_fru]]
+        # rep_u_bld = np.array([domain_start[0], domain_end[1], domain_start[2]])
+        # rep_u_fru = domain_end + tmpr
+        # rep_boundary = [[rep_b_bld, rep_b_fru], [rep_r_bld, rep_r_fru], [rep_f_bld, rep_f_fru], [rep_l_bld, rep_l_fru], [rep_d_bld, rep_d_fru], [rep_u_bld, rep_u_fru]]
+    elif dim == 2:
+        rep_b_bd = np.array([domain_start[0] - tmpr, domain_start[1] + tmpr, domain_start[2]])
+        rep_b_fu = np.array([domain_start[0] + tmpr, domain_end[1] - tmpr, domain_end[2]])
+        rep_d_bd = np.array([domain_start[0] - tmpr, domain_start[1] - tmpr, domain_start[2]])
+        rep_d_fu = np.array([domain_end[0] + tmpr, domain_start[1] + tmpr, domain_end[2]])
+        rep_f_bd = np.array([domain_end[0] - tmpr, domain_start[1] + tmpr, domain_start[2]])
+        rep_f_fu = np.array([domain_end[0] + tmpr, domain_end[1] - tmpr, domain_end[2]])
+        rep_boundary = [[rep_b_bd, rep_b_fu], [rep_d_bd, rep_d_fu], [rep_f_bd, rep_f_fu]]
+        # rep_u_bd = np.array([domain_start[0] - tmpr, domain_end[1] - tmpr, domain_start[2]])
+        # rep_u_fu = np.array([domain_end[0] + tmpr, domain_end[1] + tmpr, domain_end[2]])
+        # rep_boundary = [[rep_b_bd, rep_b_fu], [rep_d_bd, rep_d_fu], [rep_f_bd, rep_f_fu], [rep_u_bd, rep_u_fu]]
+    return rep_boundary
 
-def count_dummy_boundary(dummy_boundary, dim, offset):
-    num = 0
-    for i in range(len(dummy_boundary)):
-        num += count_cube_dummy(dummy_boundary[i][0], dummy_boundary[i][1], dim, offset)
-    return num
 
-def add_cube_dummy(ps, pos_bld, pos_fru, type, color):
-    add_cube(ps=ps, lower_corner=pos_bld, cube_size=pos_fru - pos_bld, mat_type=type, color=color, object_id=type)
 
-def add_boundary_dummy(ps, dummmy_boundary):
-    dummy_type = ps.mat_dummy_type
-    dummy_color = np.array([153, 153, 255]) / 255
-    for i in range(len(dummmy_boundary)):
-        add_cube_dummy(ps, dummmy_boundary[i][0], dummmy_boundary[i][1], dummy_type, dummy_color)

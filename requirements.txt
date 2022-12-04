@@ -1,0 +1,5 @@
+taichi
+vulkan
+numpy
+json
+trimesh

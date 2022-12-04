@@ -43,7 +43,15 @@ class MUISPHSolver(SPHBase):
     ##############################################
     @ti.kernel
     def one_step(self):
+        # ti.loop_config(serialize=True)
+
         for i in range(self.ps.particle_num[None]):
+            if self.ps.is_bdy_particle(i):
+                # @adami2012
+                bdy_v_tmp = type_vec3f(0)
+                self.ps.for_all_neighbors(i, self.calc_bdy_vel_task, bdy_v_tmp)
+                self.ps.pt[i].v_tmp = 2 * self.ps.pt[i].v - bdy_v_tmp * self.ps.pt[i].CSPM_f
+
             if self.ps.is_rigid_dynamic(i):
                 self.ps.pt[i].d_vel = self.g
 

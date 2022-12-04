@@ -4,7 +4,7 @@ from eng.particle_system import ParticleSystem
 from eng.type_define import *
 
 
-# TODO: CSPM not working
+# TODO: CSPM not working, for zero denominator
 # TODO: MLS not working now
 
 @ti.data_oriented
@@ -171,18 +171,15 @@ class SPHBase:
     ##############################################
     @ti.func
     def calc_v_grad_task(self, i, j, ret: ti.template()):
-        if self.ps.is_dummy_particle(j) or self.ps.is_rigid(j):
-            self.calc_dummy_v_tmp(i, j)
         tmp = self.kernel_deriv_corr(i, j)
         ret += self.ps.pt[j].m_V * (self.ps.pt[j].v_tmp - self.ps.pt[i].v_tmp) @ tmp.transpose()
-        # print("pt", self.ps.pt[i].id0, self.ps.pt[j].id0, "ptj.x", self.ps.pt[j].x[0:2], "ptj.v_tmp", self.ps.pt[j].v_tmp[0:2], "ker", tmp[0:2])
+        # print("====", self.ps.pt[i].id0, self.ps.pt[j].id0, "ptj.x", self.ps.pt[j].x[0:2], "ptj.v_tmp", self.ps.pt[j].v_tmp[0:2], "ker", tmp[0:2], ret[0,0])
 
     @ti.func
     def calc_d_density_task(self, i, j, ret: ti.template()):
-        if self.ps.is_dummy_particle(j) or self.ps.is_rigid(j):
-            self.calc_dummy_v_tmp(i, j)
+        # * need to multiply pti.density_tmp after summation
         tmp = (self.ps.pt[i].v_tmp - self.ps.pt[j].v_tmp).transpose() @ self.kernel_deriv_corr(i, j)
-        ret += self.ps.pt[j].m_V * tmp[0]
+        ret += self.ps.pt[j].m_V * tmp
 
 
 
@@ -195,10 +192,10 @@ class SPHBase:
 
     @ti.func
     def chk_density(self, i, density0):
-        density_min = density0
-        density_max = density0 * (1 + self.alert_ratio)
+        density_min = density0 * (1 - self.alert_ratio)
+        # density_max = density0 * (1 + self.alert_ratio)
         self.ps.pt[i].density = ti.max(density_min, self.ps.pt[i].density)
-        self.ps.pt[i].density = ti.min(density_max, self.ps.pt[i].density)
+        # self.ps.pt[i].density = ti.min(density_max, self.ps.pt[i].density)
 
     @ti.func
     def xsph_task(self, i, j, ret: ti.template()):
@@ -237,6 +234,18 @@ class SPHBase:
             if self.ps.is_soil_particle(i):
                 ver_stress = density0 * self.g.y * (ymax - self.ps.pt[i].x.y)
                 self.ps.pt[i].set_stress_diag(K0 * ver_stress, ver_stress, K0 * ver_stress)
+
+    @ti.kernel
+    def init_pressure(self, density0: float):
+        ymax = -float('Inf')
+        for i in range(self.ps.particle_num[None]):
+            if self.ps.is_fluid_particle(i):
+                ti.atomic_max(ymax, self.ps.pt[i].x.y)
+
+        for i in range(self.ps.particle_num[None]):
+            if self.ps.is_fluid_particle(i):
+                self.ps.pt[i].pressure = -density0 * self.g.y * (ymax - self.ps.pt[i].x.y)
+
 
 
     ##############################################
@@ -328,8 +337,8 @@ class SPHBase:
     # Kernel correction
     ##############################################
     def calc_kernel_corr(self):
+        self.calc_CSPM_f()
         if self.flagKernelCorr == 1:
-            self.calc_CSPM_f()
             self.calc_CSPM_L()
         elif self.flagKernelCorr == 2:
             pass
@@ -352,19 +361,22 @@ class SPHBase:
     # CSPM
     @ti.func
     def calc_CSPM_f_task(self, i, j, ret: ti.template()):
-        ret += self.ps.pt[j].m_V * self.kernel(self.ps.pt[i].x - self.ps.pt[j].x)
+        # if self.ps.pt[j].mat_type == self.ps.pt[i].mat_type:
+        if self.ps.is_real_particle(j):
+            ret += self.ps.pt[j].m_V * self.kernel(self.ps.pt[i].x - self.ps.pt[j].x)
 
     @ti.kernel
     def calc_CSPM_f(self):
         for i in range(self.ps.particle_num[None]):
             tmp_CSPM_f = 0.0
             self.ps.for_all_neighbors(i, self.calc_CSPM_f_task, tmp_CSPM_f)
-            self.ps.pt[i].CSPM_f = 1.0 / tmp_CSPM_f       # ! maybe error in 1 / 0
+            self.ps.pt[i].CSPM_f = 1.0 / tmp_CSPM_f if tmp_CSPM_f != 0.0 else 1.0      # ! maybe error in 1 / 0
 
     @ti.func
     def calc_CSPM_L_task(self, i, j, ret: ti.template()):
-        tmp = self.kernel_derivative(self.ps.pt[i].x - self.ps.pt[j].x)
-        ret += self.ps.pt[j].m_V * (self.ps.pt[j].x - self.ps.pt[i].x) @ tmp.transpose()
+        if self.ps.pt[j].mat_type == self.ps.pt[i].mat_type:
+            tmp = self.kernel_derivative(self.ps.pt[i].x - self.ps.pt[j].x)
+            ret += self.ps.pt[j].m_V * (self.ps.pt[j].x - self.ps.pt[i].x) @ tmp.transpose()
 
     @ti.kernel
     def calc_CSPM_L(self):
@@ -558,6 +570,10 @@ class SPHBase:
         # i: real particle, j: dummy particle
         # from @huModelingGranularMaterial2021
         self.ps.pt[j].v_tmp = (self.ps.pt[j].dist_B / self.ps.pt[i].dist_B) * (self.ps.pt[j].v - self.ps.pt[i].v_tmp) + self.ps.pt[j].v
+        # from @bui2008
+        # beta = ti.min(1.5, 1.0 + self.ps.pt[j].dist_B / self.ps.pt[i].dist_B)
+        # beta = 1.25
+        # self.ps.pt[j].v_tmp = (1 - beta) * self.ps.pt[i].v_tmp + beta * self.ps.pt[j].v
 
     @ti.kernel
     def calc_boundary_dist(self):
@@ -588,14 +604,40 @@ class SPHBase:
         ret += self.kernel(self.ps.pt[i].x - self.ps.pt[j].x)
 
     # smoothed velocity method, non-slip, from @adamiGeneralizedWallBoundary2012
+	# i: bdy pt, j: real pt
     @ti.func
-    def calc_v_dummy_task(self, i, j, ret: ti.template()):
-        if self.ps.is_real_particle(i):
+    def calc_bdy_density_task(self, i, j, ret: ti.template()):
+        if self.ps.is_real_particle(j):
+            ret += self.ps.pt[j].m_V * self.ps.pt[j].density_tmp * self.kernel(self.ps.pt[i].x - self.ps.pt[j].x)
+
+    @ti.func
+    def calc_bdy_vel_task(self, i, j, ret: ti.template()):
+        if self.ps.is_real_particle(j):
             ret += self.ps.pt[j].m_V * self.ps.pt[j].v_tmp * self.kernel(self.ps.pt[i].x - self.ps.pt[j].x)
+
+    @ti.func
+    def calc_bdy_pressure_task(self, i, j, ret: ti.template()):
+        if self.ps.is_real_particle(j):
+            ret += self.ps.pt[j].m_V * self.ps.pt[j].pressure * self.kernel(self.ps.pt[i].x - self.ps.pt[j].x)
 
     ##############################################
     # Repulsive particles
-
+    @ti.func
+    def calc_repulsive_force(self, r, vsound):
+        r_norm = r.norm()
+        r_judge = self.ps.particle_diameter
+        # r_judge = 1.5 * self.ps.particle_diameter
+        chi = 1.0 - r_norm / r_judge if (r_norm > 0.0 and r_norm < r_judge) else 0.0
+        gamma = r_norm / (0.75 * self.ps.smoothing_len)
+        f = 0.0
+        if gamma > 0 and gamma <= 2 / 3:
+            f = 2 / 3
+        elif gamma > 2 / 3 and gamma <= 1:
+            f = 2 * gamma - 1.5 * gamma**2
+        elif gamma > 1 and gamma < 2:
+            f = 0.5 * (2 - gamma)**2
+        res = 0.01 * vsound**2 * chi * f / (r_norm**2) * r
+        return res
 
 
     ##############################################
@@ -681,7 +723,7 @@ class SPHBase:
                 elif self.ps.color_title == 101:    # random value drawing test
                     self.ps.pt[i].val = ti.random()
                 elif self.ps.color_title == 102:
-                    self.ps.pt[i].val = self.ps.pt[i].dist_B
+                    self.ps.pt[i].val = self.ps.pt[i].CSPM_L[0,0]
                     # if self.ps.pt[i].dist_B < 0.048 and self.ps.pt[i].dist_B > 0.0:
                     #     print("pt", i, self.ps.pt[i].id0, self.ps.pt[i].dist_B)
                 elif self.ps.color_title == 103:

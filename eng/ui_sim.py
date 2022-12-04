@@ -92,12 +92,15 @@ def ui_sim(config: SimConfiger, case: Simulation):
     if save_csv:
         export_csv(0, case, simpath)
 
+    ##############################################
     # Run
+    ##############################################
     while window.running:
         # run sim
         if not pause_flag:
             # step
             for i in range(substeps):
+                # print("========", count_step)
                 case.solver.step()
                 count_step += 1
             assign_color(case, given_max, given_min, fix_max, fix_min)
@@ -150,7 +153,7 @@ def ui_sim(config: SimConfiger, case: Simulation):
 
         str_solver = "Weakly Compressible" if case.solver_type == 1 else "Mohr-Coulomb mu(I)" if case.solver_type == 2 else "Drucker-Prager" if case.solver_type == 3 else "None"
         str_TI = "1 Symplectic Euler" if case.solver.flagTI == 1 else "2 Leap-Frog" if case.solver.flagTI == 2 else "4 Runge-Kutta" if case.solver.flagTI == 4 else "None"
-        str_bdy = "Enforced collision" if case.ps.flag_boundary == case.ps.bdy_collision else "Dummy particles" if case.ps.flag_boundary == case.ps.bdy_dummy else "None"
+        str_bdy = "Enforced collision" if case.ps.flag_boundary == case.ps.bdy_collision else "Dummy particles" if case.ps.flag_boundary == case.ps.bdy_dummy else "Repulsive particles" if case.ps.flag_boundary == case.ps.bdy_rep else "Dummy + repulsive pts" if case.ps.flag_boundary == case.ps.bdy_dummy_rep else "None"
         str_kernel = "Cubic spline" if case.solver.flagKernel == 0 else "Wendland C2" if case.solver.flagKernel == 1 else "None"
         str_kernel_corr = "CSPM" if case.solver.flagKernelCorr == 1 else "MLS" if case.solver.flagKernelCorr == 2 else "None"
         window.GUI.begin("Simulation Info", 0.3, 0.03, 0.24, 0.2)
@@ -161,8 +164,10 @@ def ui_sim(config: SimConfiger, case: Simulation):
         window.GUI.text("Kernel corr: " + str_kernel_corr)
         window.GUI.end()
 
-        window.GUI.begin("Control", 0.57, 0.03, 0.32, 0.12)
+        window.GUI.begin("Control", 0.57, 0.03, 0.32, 0.2)
         movement_speed = window.GUI.slider_float("speed of camera", movement_speed, 0.0, 0.025)
+        kradius = window.GUI.slider_float("drawing radius", kradius, 0.1, 2.0)
+        # case.ps.color_title = window.GUI.slider_int("color title", case.ps.color_title, 0, 10)
         window.GUI.end()
 
         # control
@@ -201,7 +206,7 @@ def ui_sim(config: SimConfiger, case: Simulation):
 
         # exit
         if (count_step >= exit_at_step and exit_at_step > 0) or (cur_time >= exit_at_time and exit_at_time > 0):
-            captureScreen(window, cappath, time_stamp0)
+            captureScreen(window, cappath, get_time_stamp())
             window.running = False
 
         # export

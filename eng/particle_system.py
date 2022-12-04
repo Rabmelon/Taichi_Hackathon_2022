@@ -1,6 +1,6 @@
 import taichi as ti
 import numpy as np
-from eng.scan_single_buffer import parallel_prefix_sum_inclusive_inplace
+# from eng.scan_single_buffer import parallel_prefix_sum_inclusive_inplace
 from eng.configer_builder import SimConfiger
 from eng.colormap import color_map
 from eng.particle_func import *
@@ -18,8 +18,9 @@ class ParticleSystem:
         self.color_title = self.cfg.get_cfg("colorTitle")
         self.flag_boundary = self.cfg.get_cfg("boundary")   # 0: none, 1: collision, 2: dummy particles, 3: dummy + repulsive particles
         self.show_dummy = self.cfg.get_cfg("showDummyPts")
-        self.mat_dummy_type, self.mat_fluid_type, self.mat_soil_type, self.mat_rigid_type = 0, 1, 2, 11
-        self.bdy_none, self.bdy_collision, self.bdy_dummy = 0, 1, 2
+        self.mat_dummy_type, self.mat_rep_type = 0, -1
+        self.mat_fluid_type, self.mat_soil_type, self.mat_rigid_type = 1, 2, 11
+        self.bdy_none, self.bdy_collision, self.bdy_dummy, self.bdy_rep, self.bdy_dummy_rep = 0, 1, 2, 3, 4
 
         ##############################################
         # Basics
@@ -108,12 +109,19 @@ class ParticleSystem:
 
         # Check dummy particle number
         dummy_particle_num = 0
-        if self.flag_boundary == self.bdy_dummy:
+        if self.flag_boundary == self.bdy_dummy or self.flag_boundary == self.bdy_dummy_rep:
             self.dummy_boundary = calc_dummy_boundary(self.dim, self.domain_start, self.domain_end, self.vdomain_start, self.vdomain_end)
-            dummy_particle_num = count_dummy_boundary(self.dummy_boundary, self.dim, self.particle_diameter)
+            dummy_particle_num = count_boundary(self.dummy_boundary, self.dim, self.particle_diameter)
             print("Dummy particle number: %d" % (dummy_particle_num))
 
-        self.particle_max_num = fluid_particle_num + rigid_particle_num + dummy_particle_num
+        # Check repulsive particle number
+        rep_particle_num = 0
+        if self.flag_boundary == self.bdy_rep or self.flag_boundary == self.bdy_dummy_rep:
+            self.rep_boundary = calc_rep_boundary(self.dim, self.domain_start, self.domain_end, self.particle_radius)
+            rep_particle_num = count_boundary(self.rep_boundary, self.dim, self.particle_radius)
+            print("Repulsive particle number: %d" % (rep_particle_num))
+
+        self.particle_max_num = fluid_particle_num + rigid_particle_num + dummy_particle_num + rep_particle_num
         print(f"Particle total num: {self.particle_max_num}")
 
         ##############################################
@@ -124,13 +132,15 @@ class ParticleSystem:
         self.pt_empty = Particle.field(shape=())
 
         # Particle num of each grid
-        self.grid_particle_num = ti.field(int)
-        self.grid_particle_num_temp = ti.field(int)
-        grid_node = ti.root.dense(ti.i, self.grid_num_total)
-        grid_node.place(self.grid_particle_num, self.grid_particle_num_temp)
+        self.grid_particle_num = ti.field(int, shape=self.grid_num_total)
+        self.grid_particle_num_temp = ti.field(int, shape=self.grid_num_total)
+        # grid_node = ti.root.dense(ti.i, self.grid_num_total)
+        # grid_node.place(self.grid_particle_num, self.grid_particle_num_temp)
 
         # rigid body
         self.rigid_rest_cm = type_vec3f.field(shape=ti.max(len(self.rigid_blocks)+len(self.rigid_bodies), 1))
+
+        self.prefix_sum_executor = ti.algorithms.PrefixSumExecutor(self.grid_particle_num.shape[0])
 
         ##############################################
         # Initialize particles
@@ -139,6 +149,7 @@ class ParticleSystem:
         self.set_id0()
 
         print("Particle system construction complete!")
+
 
     def initialize_particles(self):
         # Fluid block
@@ -214,9 +225,12 @@ class ParticleSystem:
                 is_dynamic * np.ones(num_particles_obj, dtype=np.int32),  # is_dynamic
                 np.stack([color for _ in range(num_particles_obj)]))  # color
 
-        # Boundary dummy particles
-        if self.flag_boundary == self.bdy_dummy:
-            add_boundary_dummy(self, self.dummy_boundary)
+        # Boundary particles
+        if self.flag_boundary == self.bdy_dummy or self.flag_boundary == self.bdy_dummy_rep:
+            add_boundary(self, self.dummy_boundary, self.mat_dummy_type, color=[153, 153, 255])
+        if self.flag_boundary == self.bdy_rep or self.flag_boundary == self.bdy_dummy_rep:
+            add_boundary(self, self.rep_boundary, self.mat_rep_type, offset=self.particle_radius, color=[170, 17, 255])
+
 
     @ti.kernel
     def clear_particles(self):
@@ -277,8 +291,9 @@ class ParticleSystem:
 
     def initialize_particle_system(self):
         self.update_grid_id()
+        self.prefix_sum_executor.run(self.grid_particle_num)
         # FIXME: change to taichi built-in prefix_sum_inclusive_inplace after next Taichi release i.e., 1.1.4
-        parallel_prefix_sum_inclusive_inplace(self.grid_particle_num, self.grid_particle_num.shape[0])
+        # parallel_prefix_sum_inclusive_inplace(self.grid_particle_num, self.grid_particle_num.shape[0])
         self.counting_sort()
 
     @ti.func
@@ -359,6 +374,14 @@ class ParticleSystem:
         return self.pt[p].mat_type == self.mat_dummy_type
 
     @ti.func
+    def is_rep_particle(self, p):
+        return self.pt[p].mat_type == self.mat_rep_type
+
+    @ti.func
+    def is_bdy_particle(self, p):
+        return self.pt[p].mat_type == self.mat_rep_type or self.pt[p].mat_type == self.mat_dummy_type
+
+    @ti.func
     def is_rigid(self, p):
         return self.pt[p].mat_type == self.mat_rigid_type
 
@@ -376,7 +399,8 @@ class ParticleSystem:
     @ti.kernel
     def copy2vis(self, w2s_ratio: float):
         for i in range(self.particle_num[None]):
-            if self.is_real_particle(i) or (self.show_dummy and self.is_dummy_particle(i)):
+            # if self.is_real_particle(i) or (self.show_dummy and self.is_dummy_particle(i)):
+            if self.is_real_particle(i) or (self.show_dummy and self.is_dummy_particle(i)) or (self.show_dummy and self.is_rep_particle(i)):
                 for j in ti.static(range(self.dim3)):
                     self.pt[i].pos2vis[j] = ti.cast((self.pt[i].x[j]) * w2s_ratio, ti.f32)
 
